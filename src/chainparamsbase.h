@@ -49,7 +49,9 @@ void SelectBaseParams(const std::string& chain);
 
 /**
  * Looks for -regtest, -testnet and returns the appropriate BIP70 chain name.
- * @return CBaseChainParams::MAX_NETWORK_TYPES if an invalid combination is given. CBaseChainParams::MAIN by default.
+ * Validates that -regtesttestnet is only used with -regtest.
+ * @throws std::runtime_error if an invalid combination is given.
+ * Returns CBaseChainParams::MAIN by default.
  */
 std::string ChainNameFromCommandLine();
 

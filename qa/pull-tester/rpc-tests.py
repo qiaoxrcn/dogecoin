@@ -210,6 +210,7 @@ testScriptsExt = [
     'txn_clone.py --mineblock',
     'forknotify.py',
     'invalidateblock.py',
+    'regtest_testnet.py',
     'maxblocksinflight.py',
 ]
 

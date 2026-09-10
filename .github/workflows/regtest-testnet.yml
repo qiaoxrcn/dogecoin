@@ -1,0 +1,81 @@
+name: Regtest with testnet formats
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - 'regtest-testnet/**'
+  pull_request:
+    paths:
+      - 'src/chainparams*'
+      - 'src/test/chainparams_tests.cpp'
+      - 'src/Makefile.test.include'
+      - 'qa/rpc-tests/regtest_testnet.py'
+      - '.github/workflows/regtest-testnet.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf automake libtool bsdmainutils \
+            pkg-config libssl-dev libevent-dev libboost-system-dev \
+            libboost-filesystem-dev libboost-chrono-dev libboost-program-options-dev \
+            libboost-test-dev libboost-thread-dev libdb5.3++-dev libzmq3-dev
+
+      - name: Configure and build daemon, wallet, CLI and tests
+        run: |
+          ./autogen.sh
+          ./configure --without-gui --without-miniupnpc --disable-bench --enable-zmq
+          make -j2
+
+      - name: Run unit tests
+        run: make -j2 check VERBOSE=1
+
+      - name: Test testnet compatibility and reorg
+        run: |
+          python3 qa/rpc-tests/regtest_testnet.py --srcdir="$GITHUB_WORKSPACE/src" --tmpdir="$RUNNER_TEMP/regtest-testnet"
+          python3 qa/rpc-tests/invalidateblock.py --srcdir="$GITHUB_WORKSPACE/src" --tmpdir="$RUNNER_TEMP/original-regtest"
+
+      - name: Package Linux binaries
+        run: |
+          mkdir -p artifacts/dogecoin-regtest-testnet/bin
+          install -m 755 src/dogecoind src/dogecoin-cli src/dogecoin-tx artifacts/dogecoin-regtest-testnet/bin/
+          strip artifacts/dogecoin-regtest-testnet/bin/*
+          cp doc/regtest-testnet.md COPYING artifacts/dogecoin-regtest-testnet/
+          git rev-parse HEAD > artifacts/dogecoin-regtest-testnet/COMMIT
+          ldd src/dogecoind > artifacts/dogecoin-regtest-testnet/runtime-libraries.txt
+          tar -C artifacts -czf artifacts/dogecoin-regtest-testnet-linux-x86_64.tar.gz dogecoin-regtest-testnet
+          cd artifacts
+          sha256sum dogecoin-regtest-testnet-linux-x86_64.tar.gz > SHA256SUMS
+
+      - name: Upload tested binaries
+        uses: actions/upload-artifact@v6
+        with:
+          name: dogecoin-regtest-testnet-linux-x86_64-${{ github.sha }}
+          path: |
+            artifacts/*.tar.gz
+            artifacts/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: regtest-testnet-failure-logs
+          path: |
+            config.log
+            src/test-suite.log
+            ${{ runner.temp }}/regtest-testnet/**/debug.log
+            ${{ runner.temp }}/original-regtest/**/debug.log
+          retention-days: 7

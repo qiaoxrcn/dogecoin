@@ -12,6 +12,8 @@
 #include "utilstrencodings.h"
 
 #include <assert.h>
+#include <algorithm>
+#include <iterator>
 
 #include <boost/assign/list_of.hpp>
 
@@ -379,7 +381,7 @@ private:
     Consensus::Params digishieldConsensus;
     Consensus::Params auxpowConsensus;
 public:
-    CRegTestParams() {
+    explicit CRegTestParams(bool testnetFormats = false) {
         strNetworkID = "regtest";
         consensus.nSubsidyHalvingInterval = 150;
         consensus.nMajorityEnforceBlockUpgrade = 750;
@@ -474,6 +476,14 @@ public:
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,239);  // 0xef
         base58Prefixes[EXT_PUBLIC_KEY] = boost::assign::list_of(0x04)(0x35)(0x87)(0xCF).convert_to_container<std::vector<unsigned char> >();
         base58Prefixes[EXT_SECRET_KEY] = boost::assign::list_of(0x04)(0x35)(0x83)(0x94).convert_to_container<std::vector<unsigned char> >();
+
+        if (testnetFormats) {
+            // Keep regtest consensus and discovery settings, but use testnet
+            // encodings for private explorer integration tests.
+            std::copy(std::begin(testNetParams.MessageStart()), std::end(testNetParams.MessageStart()), pchMessageStart);
+            for (int i = 0; i < MAX_BASE58_TYPES; ++i)
+                base58Prefixes[i] = testNetParams.Base58Prefix(static_cast<Base58Type>(i));
+        }
     }
 
     void UpdateBIP9Parameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout)
@@ -483,6 +493,7 @@ public:
     }
 };
 static CRegTestParams regTestParams;
+static CRegTestParams regTestTestNetParams(true);
 
 static CChainParams *pCurrentParams = 0;
 
@@ -512,7 +523,7 @@ CChainParams& Params(const std::string& chain)
     else if (chain == CBaseChainParams::TESTNET)
             return testNetParams;
     else if (chain == CBaseChainParams::REGTEST)
-            return regTestParams;
+            return GetBoolArg("-regtesttestnet", false) ? regTestTestNetParams : regTestParams;
     else
         throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
 }
@@ -526,4 +537,5 @@ void SelectParams(const std::string& network)
 void UpdateRegtestBIP9Parameters(Consensus::DeploymentPos d, int64_t nStartTime, int64_t nTimeout)
 {
     regTestParams.UpdateBIP9Parameters(d, nStartTime, nTimeout);
+    regTestTestNetParams.UpdateBIP9Parameters(d, nStartTime, nTimeout);
 }

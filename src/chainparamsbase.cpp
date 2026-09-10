@@ -18,6 +18,7 @@ void AppendParamsHelpMessages(std::string& strUsage, bool debugHelp)
 {
     strUsage += HelpMessageGroup(_("Chain selection options:"));
     strUsage += HelpMessageOpt("-testnet", _("Use the test chain"));
+    strUsage += HelpMessageOpt("-regtesttestnet", _("Use testnet address/key encodings and message magic with -regtest (private testing only; data directory: regtest-testnet)"));
     if (debugHelp) {
         strUsage += HelpMessageOpt("-regtest", "Enter regression test mode, which uses a special chain in which blocks can be solved instantly. "
                                    "This is intended for regression testing tools and app development.");
@@ -57,13 +58,14 @@ static CBaseTestNetParams testNetParams;
 class CBaseRegTestParams : public CBaseChainParams
 {
 public:
-    CBaseRegTestParams()
+    explicit CBaseRegTestParams(bool testnetFormats = false)
     {
         nRPCPort = 18332;
-        strDataDir = "regtest";
+        strDataDir = testnetFormats ? "regtest-testnet" : "regtest";
     }
 };
 static CBaseRegTestParams regTestParams;
+static CBaseRegTestParams regTestTestNetParams(true);
 
 static CBaseChainParams* pCurrentBaseParams = 0;
 
@@ -80,7 +82,7 @@ CBaseChainParams& BaseParams(const std::string& chain)
     else if (chain == CBaseChainParams::TESTNET)
         return testNetParams;
     else if (chain == CBaseChainParams::REGTEST)
-        return regTestParams;
+        return GetBoolArg("-regtesttestnet", false) ? regTestTestNetParams : regTestParams;
     else
         throw std::runtime_error(strprintf("%s: Unknown chain %s.", __func__, chain));
 }
@@ -97,6 +99,8 @@ std::string ChainNameFromCommandLine()
 
     if (fTestNet && fRegTest)
         throw std::runtime_error("Invalid combination of -regtest and -testnet.");
+    if (GetBoolArg("-regtesttestnet", false) && !fRegTest)
+        throw std::runtime_error("-regtesttestnet requires -regtest.");
     if (fRegTest)
         return CBaseChainParams::REGTEST;
     if (fTestNet)
