@@ -21,12 +21,15 @@ Raw secp256k1 public keys already use the same serialization on all networks:
 33-byte compressed keys (`02`/`03`) or 65-byte uncompressed keys (`04`). Private
 scalar bytes are also network-independent; WIF is their network-specific encoding.
 
-## Build on GitHub
+## Docker image built on GitHub
 
 The **Regtest with testnet formats** Actions workflow builds Linux x86_64 binaries
 with wallet and ZMQ support on Ubuntu 22.04. It runs the C++ unit tests, a new
 testnet-format/reorg integration test, and the existing regtest invalidation test.
-The artifact is uploaded only after all those steps succeed.
+The binaries are placed in an Ubuntu 22.04 runtime container, running as user
+`dogecoin` (UID 10001), with the same wallet and ZMQ support. Container RPC,
+mining, invalidation/reconsideration and persistence are tested before publication.
+All compilation and container building take place in GitHub Actions.
 
 Push the changes to `master` or a branch named `regtest-testnet/<name>` in a
 repository where you have write access and Actions is enabled. Once this workflow
@@ -39,12 +42,59 @@ gh run list --repo OWNER/dogecoin --workflow regtest-testnet.yml
 gh run download RUN_ID --repo OWNER/dogecoin
 ```
 
-The downloadable artifact contains a tar archive with `dogecoind`, `dogecoin-cli`,
-`dogecoin-tx`, this document, a commit ID, and a runtime library list. `SHA256SUMS`
-checks the archive. These are dynamically linked Ubuntu 22.04 binaries, not a
-portable static release. Install matching runtime libraries on the target host;
-consult `runtime-libraries.txt` (Boost, Berkeley DB 5.3, OpenSSL, libevent, ZMQ).
-The repository's existing CI also provides builds for other platforms.
+The delivered image is Linux **amd64** and is published to
+`ghcr.io/qiaoxrcn/dogecoin-regtest-testnet:latest` and a tag containing the full
+Git commit SHA. Use the SHA tag to pin a particular test version. In another fork,
+the workflow automatically uses that repository owner's GHCR namespace.
+
+GitHub initially creates container packages as private. For authenticated pulls,
+log in to GHCR with a token that can read the package. To allow anonymous pulls,
+the package owner can set visibility to public in its GitHub package settings.
+
+The workflow also uploads the same tested image as
+`dogecoin-regtest-testnet-docker.tar.gz` plus `SHA256SUMS` under the run's
+**Artifacts** section, retained for 14 days. This is a Docker image archive, not
+a standalone binary package. It can be loaded without GHCR credentials:
+
+```bash
+sha256sum -c SHA256SUMS
+docker load -i dogecoin-regtest-testnet-docker.tar.gz
+```
+
+## Run the container
+
+```bash
+docker pull ghcr.io/qiaoxrcn/dogecoin-regtest-testnet:latest
+docker run -d --name doge-reorg \
+  -v doge-reorg-data:/data \
+  ghcr.io/qiaoxrcn/dogecoin-regtest-testnet:latest
+
+docker exec doge-reorg dogecoin-cli -regtest -regtesttestnet -datadir=/data -rpcwait getblockchaininfo
+docker exec doge-reorg dogecoin-cli -regtest -regtesttestnet -datadir=/data generate 65
+```
+
+The image defaults to `-regtest -regtesttestnet`, enables `txindex`, disables
+automatic outbound peers and runs in the foreground. Data is persisted under
+`/data/regtest-testnet/`. Named volumes inherit the correct permissions; if using
+a host bind mount, make it writable by UID 10001. `docker stop -t 60 doge-reorg`
+allows a graceful shutdown. The CLI is included and uses the node's RPC cookie
+in the example above. No RPC ports are published by that command.
+
+For an explorer on the Docker host, use the supplied Compose file:
+
+```bash
+export DOGECOIN_RPC_PASSWORD='replace-with-a-private-test-password'
+docker compose -f contrib/docker/compose.regtest-testnet.yml up -d
+```
+
+It publishes RPC at `http://127.0.0.1:18332`, with user `explorer` and the password
+you set. P2P is at `127.0.0.1:18444`. Inside the same Compose network, use service
+hostname `dogecoin` instead of `127.0.0.1`. RPC listens on the container interface
+with password authentication; host ports are bound to loopback. With this
+password configuration, pass `-rpcuser=explorer -rpcpassword=...` to CLI commands,
+or mount your own `/data/dogecoin.conf` containing the credentials. To add ZMQ
+notifications, append options such as `-zmqpubrawblock=tcp://0.0.0.0:28332` and
+publish the corresponding port on the private test network.
 
 ## Start a private explorer node
 
@@ -53,11 +103,11 @@ block database into the new subdirectory.
 
 ```bash
 mkdir -p "$PWD/explorer-data"
-./bin/dogecoind -regtest -regtesttestnet -datadir="$PWD/explorer-data" \
+dogecoind -regtest -regtesttestnet -datadir="$PWD/explorer-data" \
   -daemon -txindex=1 -connect=0 -dnsseed=0 -listenonion=0 -bind=127.0.0.1
 
-./bin/dogecoin-cli -regtest -regtesttestnet -datadir="$PWD/explorer-data" getnewaddress
-./bin/dogecoin-cli -regtest -regtesttestnet -datadir="$PWD/explorer-data" generate 65
+dogecoin-cli -regtest -regtesttestnet -datadir="$PWD/explorer-data" getnewaddress
+dogecoin-cli -regtest -regtesttestnet -datadir="$PWD/explorer-data" generate 65
 ```
 
 Alternatively, place `regtest=1` and `regtesttestnet=1` in `dogecoin.conf` in the

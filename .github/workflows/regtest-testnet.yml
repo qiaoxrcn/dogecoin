@@ -12,6 +12,7 @@ on:
       - 'src/test/chainparams_tests.cpp'
       - 'src/Makefile.test.include'
       - 'qa/rpc-tests/regtest_testnet.py'
+      - 'contrib/docker/**'
       - '.github/workflows/regtest-testnet.yml'
 
 permissions:
@@ -21,21 +22,36 @@ jobs:
   linux:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v5
 
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential autoconf automake libtool bsdmainutils \
+          sudo apt-get install -y build-essential autoconf automake libtool bsdmainutils ccache \
             pkg-config libssl-dev libevent-dev libboost-system-dev \
             libboost-filesystem-dev libboost-chrono-dev libboost-program-options-dev \
             libboost-test-dev libboost-thread-dev libdb5.3++-dev libzmq3-dev
 
+      - name: Restore compiler cache
+        id: compiler-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .ccache
+          key: linux-regtest-testnet-ccache-${{ github.sha }}
+          restore-keys: linux-regtest-testnet-ccache-
+
       - name: Configure and build daemon, wallet, CLI and tests
         run: |
           ./autogen.sh
-          ./configure --without-gui --without-miniupnpc --disable-bench --enable-zmq
+          ccache --max-size=500M
+          ./configure --without-gui --without-miniupnpc --disable-bench --enable-zmq \
+            CC="ccache gcc" CXX="ccache g++" CFLAGS="-O2" CXXFLAGS="-O2"
           make -j2
 
       - name: Run unit tests
@@ -46,27 +62,80 @@ jobs:
           python3 qa/rpc-tests/regtest_testnet.py --srcdir="$GITHUB_WORKSPACE/src" --tmpdir="$RUNNER_TEMP/regtest-testnet"
           python3 qa/rpc-tests/invalidateblock.py --srcdir="$GITHUB_WORKSPACE/src" --tmpdir="$RUNNER_TEMP/original-regtest"
 
-      - name: Package Linux binaries
+      - name: Stage tested binaries for Docker
         run: |
           mkdir -p artifacts/dogecoin-regtest-testnet/bin
           install -m 755 src/dogecoind src/dogecoin-cli src/dogecoin-tx artifacts/dogecoin-regtest-testnet/bin/
           strip artifacts/dogecoin-regtest-testnet/bin/*
           cp doc/regtest-testnet.md COPYING artifacts/dogecoin-regtest-testnet/
           git rev-parse HEAD > artifacts/dogecoin-regtest-testnet/COMMIT
-          ldd src/dogecoind > artifacts/dogecoin-regtest-testnet/runtime-libraries.txt
-          tar -C artifacts -czf artifacts/dogecoin-regtest-testnet-linux-x86_64.tar.gz dogecoin-regtest-testnet
-          cd artifacts
-          sha256sum dogecoin-regtest-testnet-linux-x86_64.tar.gz > SHA256SUMS
 
-      - name: Upload tested binaries
+      - name: Build Docker runtime image
+        env:
+          IMAGE_OWNER: ${{ github.repository_owner }}
+        run: |
+          image="ghcr.io/${IMAGE_OWNER,,}/dogecoin-regtest-testnet"
+          echo "DOCKER_IMAGE=$image" >> "$GITHUB_ENV"
+          docker build -f contrib/docker/Dockerfile.regtest-testnet \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "$image:$GITHUB_SHA" artifacts/dogecoin-regtest-testnet
+
+      - name: Test container RPC, mining, rollback and persistence
+        run: |
+          trap 'docker logs dogecoin-container-test; docker rm -fv dogecoin-container-test; docker volume rm dogecoin-container-test-data' EXIT
+          docker volume create dogecoin-container-test-data
+          docker run -d --name dogecoin-container-test \
+            -v dogecoin-container-test-data:/data "$DOCKER_IMAGE:$GITHUB_SHA"
+          cli() {
+            docker exec dogecoin-container-test dogecoin-cli \
+              -regtest -regtesttestnet -datadir=/data "$@"
+          }
+          timeout 60 docker exec dogecoin-container-test dogecoin-cli \
+            -regtest -regtesttestnet -datadir=/data -rpcwait getblockchaininfo
+          cli generate 65
+          test "$(cli getblockcount)" = 65
+          tip="$(cli getbestblockhash)"
+          cli invalidateblock "$tip"
+          test "$(cli getblockcount)" = 64
+          cli reconsiderblock "$tip"
+          test "$(cli getbestblockhash)" = "$tip"
+          docker stop -t 60 dogecoin-container-test
+          docker start dogecoin-container-test
+          timeout 60 docker exec dogecoin-container-test dogecoin-cli \
+            -regtest -regtesttestnet -datadir=/data -rpcwait getblockcount
+          test "$(cli getbestblockhash)" = "$tip"
+
+      - name: Export tested Docker image
+        run: |
+          docker tag "$DOCKER_IMAGE:$GITHUB_SHA" "$DOCKER_IMAGE:latest"
+          docker save "$DOCKER_IMAGE:$GITHUB_SHA" "$DOCKER_IMAGE:latest" | gzip > artifacts/dogecoin-regtest-testnet-docker.tar.gz
+          cd artifacts
+          sha256sum dogecoin-regtest-testnet-docker.tar.gz > SHA256SUMS
+
+      - name: Upload Docker image archive
         uses: actions/upload-artifact@v6
         with:
-          name: dogecoin-regtest-testnet-linux-x86_64-${{ github.sha }}
+          name: dogecoin-regtest-testnet-docker-${{ github.sha }}
           path: |
-            artifacts/*.tar.gz
+            artifacts/*-docker.tar.gz
             artifacts/SHA256SUMS
           if-no-files-found: error
+          compression-level: 0
           retention-days: 14
+
+      - name: Publish tested image to GHCR
+        if: github.event_name != 'pull_request'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          docker push "$DOCKER_IMAGE:$GITHUB_SHA"
+          docker tag "$DOCKER_IMAGE:$GITHUB_SHA" "$DOCKER_IMAGE:latest"
+          docker push "$DOCKER_IMAGE:latest"
+          docker logout ghcr.io
+          echo "Docker image: \`$DOCKER_IMAGE:$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload failure logs
         if: failure()
@@ -79,3 +148,10 @@ jobs:
             ${{ runner.temp }}/regtest-testnet/**/debug.log
             ${{ runner.temp }}/original-regtest/**/debug.log
           retention-days: 7
+
+      - name: Save compiler cache
+        if: always() && steps.compiler-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .ccache
+          key: linux-regtest-testnet-ccache-${{ github.sha }}
