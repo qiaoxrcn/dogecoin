@@ -71,7 +71,9 @@ class RegtestTestnetTest(BitcoinTestFramework):
         # Public test vector: private scalar 1 (never use for real funds).
         wif = base58check(b"\xf1" + (1).to_bytes(32, "big") + b"\x01")
         pubkey = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
-        keyhash = hashlib.new("ripemd160", hashlib.sha256(bytes.fromhex(pubkey)).digest()).digest()
+        # HASH160 of the compressed generator point. Keep this vector explicit:
+        # Python builds using OpenSSL 3 may not expose the RIPEMD160 provider.
+        keyhash = bytes.fromhex("751e76e8199196d454941c45d1b3a323f1433bd6")
         address = base58check(b"\x71" + keyhash)
         for rpc in (node, testnet):
             rpc.importprivkey(wif, "format-test", False)
