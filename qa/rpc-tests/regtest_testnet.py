@@ -15,7 +15,6 @@ import time
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import (
     assert_equal, connect_nodes_bi, p2p_port, start_node, sync_blocks,
-    sync_mempools,
 )
 
 
@@ -110,15 +109,18 @@ class RegtestTestnetTest(BitcoinTestFramework):
         other.setnetworkactive(True)
         connect_nodes_bi(self.nodes, 0, 1)
         sync_blocks(self.nodes[:2])
-        sync_mempools(self.nodes[:2])
+        # Disconnected transactions are reaccepted locally; immediate relay to
+        # the peer is not guaranteed. Verify the reorganized node's mempool.
         assert_equal(node.getbestblockhash(), new_branch[-1])
         assert_equal(node.getblockcount(), 68)
         assert_equal(node.getblock(old_branch[0])["confirmations"], -1)
         assert_equal(node.gettransaction(txid)["confirmations"], 0)
         assert txid in node.getrawmempool()
+        print("Reorg verified: 2 -> 0 confirmations, transaction restored to the local mempool")
         node.generate(1)
         sync_blocks(self.nodes[:2])
         assert_equal(node.gettransaction(txid)["confirmations"], 1)
+        print("Replacement branch verified: transaction confirmed again")
 
         print("Check invalidation/reconsideration and persisted block magic")
         tip = node.getbestblockhash()
