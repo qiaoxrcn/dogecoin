@@ -39,7 +39,7 @@ class RegtestTestnetTest(BitcoinTestFramework):
     def setup_network(self):
         self.nodes = []
         for i in range(self.num_nodes):
-            args = ["-connect=0", "-dnsseed=0", "-txindex=1"]
+            args = ["-connect=0", "-dnsseed=0", "-bind=127.0.0.1", "-txindex=1"]
             if i < 2:
                 args += ["-regtesttestnet=1"]
             elif i == 2:
@@ -132,7 +132,7 @@ class RegtestTestnetTest(BitcoinTestFramework):
             with open(os.path.join(root, "regtest-testnet", "blocks", "blk00000.dat"), "rb") as blocks:
                 assert_equal(blocks.read(4), bytes.fromhex("fcc1b7dc"))
             assert not os.path.exists(os.path.join(root, "regtest", "blocks"))
-            self.nodes[i] = start_node(i, self.options.tmpdir, ["-regtesttestnet", "-connect=0", "-txindex=1"])
+            self.nodes[i] = start_node(i, self.options.tmpdir, ["-regtesttestnet", "-connect=0", "-bind=127.0.0.1", "-txindex=1"])
             assert_equal(self.nodes[i].getbestblockhash(), tip)
 
 

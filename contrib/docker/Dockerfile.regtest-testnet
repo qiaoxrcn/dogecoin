@@ -19,4 +19,4 @@ VOLUME ["/data"]
 EXPOSE 18332 18444
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["dogecoind", "-regtest", "-regtesttestnet", "-datadir=/data", "-server=1", "-txindex=1", "-printtoconsole=1", "-connect=0", "-dnsseed=0", "-listenonion=0"]
+ENTRYPOINT ["dogecoind", "-regtest", "-regtesttestnet", "-datadir=/data", "-server=1", "-txindex=1", "-printtoconsole=1", "-connect=0", "-dnsseed=0", "-listen=1", "-listenonion=0"]
