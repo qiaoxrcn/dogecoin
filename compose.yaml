@@ -1,0 +1,33 @@
+services:
+  dogecoin:
+    image: ${DOGECOIN_IMAGE:-ghcr.io/qiaoxrcn/dogecoin-regtest-testnet:latest}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      DOGECOIN_RPC_USER: ${DOGECOIN_RPC_USER:-explorer}
+      DOGECOIN_RPC_PASSWORD: ${DOGECOIN_RPC_PASSWORD:?Set DOGECOIN_RPC_PASSWORD in .env}
+    command:
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcuser=${DOGECOIN_RPC_USER:-explorer}
+      - -rpcpassword=${DOGECOIN_RPC_PASSWORD:?Set DOGECOIN_RPC_PASSWORD in .env}
+    ports:
+      - "${DOGECOIN_BIND_IP:-127.0.0.1}:${DOGECOIN_RPC_PORT:-18332}:18332"
+      - "${DOGECOIN_BIND_IP:-127.0.0.1}:${DOGECOIN_P2P_PORT:-18444}:18444"
+    volumes:
+      - dogecoin-data:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          dogecoin-cli -regtest -regtesttestnet -datadir=/data
+          -rpcuser="$${DOGECOIN_RPC_USER}" -rpcpassword="$${DOGECOIN_RPC_PASSWORD}"
+          getblockcount > /dev/null 2>&1
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    stop_grace_period: 60s
+
+volumes:
+  dogecoin-data:

@@ -1,4 +1,5 @@
 *.tar.gz
+/.env
 
 *.exe
 src/dogecoin

@@ -80,19 +80,46 @@ a host bind mount, make it writable by UID 10001. `docker stop -t 60 doge-reorg`
 allows a graceful shutdown. The CLI is included and uses the node's RPC cookie
 in the example above. No RPC ports are published by that command.
 
-For an explorer on the Docker host, use the supplied Compose file:
+For an explorer on the Docker host, use `compose.yaml` in the repository root:
 
 ```bash
-export DOGECOIN_RPC_PASSWORD='replace-with-a-private-test-password'
-docker compose -f contrib/docker/compose.regtest-testnet.yml up -d
+cp .env.example .env
+# Edit .env and set DOGECOIN_RPC_PASSWORD.
+docker compose up -d --wait
+docker compose ps
+docker compose logs -f dogecoin
 ```
 
-It publishes RPC at `http://127.0.0.1:18332`, with user `explorer` and the password
-you set. P2P is at `127.0.0.1:18444`. Inside the same Compose network, use service
-hostname `dogecoin` instead of `127.0.0.1`. RPC listens on the container interface
-with password authentication; host ports are bound to loopback. With this
-password configuration, pass `-rpcuser=explorer -rpcpassword=...` to CLI commands,
-or mount your own `/data/dogecoin.conf` containing the credentials. To add ZMQ
+The `.env` file is excluded from Git. The example pins the previously tested
+image; `DOGECOIN_IMAGE` can select another published tag. Compose pulls the image
+without compiling anything. It enables automatic restart and checks RPC health;
+`--wait` waits for the service to become healthy.
+
+RPC defaults to `http://127.0.0.1:18332`, with user `explorer` and the password
+you set. P2P is at `127.0.0.1:18444`. Set `DOGECOIN_BIND_IP` to the server's private
+IP to accept connections from other machines. `DOGECOIN_RPC_PORT` and
+`DOGECOIN_P2P_PORT` control host ports; container ports stay 18332 and 18444.
+Inside the same Compose network, use service hostname `dogecoin`.
+
+Run RPC commands using the credentials already passed to the container:
+
+```bash
+rpc() {
+  docker compose exec -T dogecoin sh -c '
+    exec dogecoin-cli -regtest -regtesttestnet -datadir=/data \
+      -rpcuser="$DOGECOIN_RPC_USER" -rpcpassword="$DOGECOIN_RPC_PASSWORD" "$@"
+  ' sh "$@"
+}
+rpc generate 65
+rpc invalidateblock "$(rpc getbestblockhash)"
+rpc generate 2
+```
+
+`docker compose down` stops the service and retains the blockchain volume.
+To intentionally discard this project's chain and wallet, run
+`docker compose down -v`. The previous
+`docker compose -f contrib/docker/compose.regtest-testnet.yml` entry point remains
+available and reuses the root service definition. To add ZMQ
 notifications, append options such as `-zmqpubrawblock=tcp://0.0.0.0:28332` and
 publish the corresponding port on the private test network.
 

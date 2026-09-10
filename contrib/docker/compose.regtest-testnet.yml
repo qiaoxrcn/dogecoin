@@ -1,17 +1,8 @@
 services:
   dogecoin:
-    image: ghcr.io/qiaoxrcn/dogecoin-regtest-testnet:latest
-    command:
-      - -rpcbind=0.0.0.0
-      - -rpcallowip=0.0.0.0/0
-      - -rpcuser=explorer
-      - -rpcpassword=${DOGECOIN_RPC_PASSWORD:?Set DOGECOIN_RPC_PASSWORD}
-    ports:
-      - "127.0.0.1:18332:18332"
-      - "127.0.0.1:18444:18444"
-    volumes:
-      - dogecoin-data:/data
-    stop_grace_period: 60s
+    extends:
+      file: ../../compose.yaml
+      service: dogecoin
 
 volumes:
   dogecoin-data:
