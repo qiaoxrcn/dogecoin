@@ -92,8 +92,15 @@ jobs:
             docker exec dogecoin-container-test dogecoin-cli \
               -regtest -regtesttestnet -datadir=/data "$@"
           }
-          timeout 60 docker exec dogecoin-container-test dogecoin-cli \
-            -regtest -regtesttestnet -datadir=/data -rpcwait getblockchaininfo
+          wait_rpc() {
+            for attempt in {1..60}; do
+              if cli getblockchaininfo > /dev/null 2>&1; then return 0; fi
+              sleep 1
+            done
+            return 1
+          }
+          wait_rpc
+          cli getblockchaininfo
           python3 -c 'import socket; socket.create_connection(("127.0.0.1", 18444), timeout=5).close()'
           cli generate 65
           test "$(cli getblockcount)" = 65
@@ -104,8 +111,7 @@ jobs:
           test "$(cli getbestblockhash)" = "$tip"
           docker stop -t 60 dogecoin-container-test
           docker start dogecoin-container-test
-          timeout 60 docker exec dogecoin-container-test dogecoin-cli \
-            -regtest -regtesttestnet -datadir=/data -rpcwait getblockcount
+          wait_rpc
           test "$(cli getbestblockhash)" = "$tip"
 
       - name: Export tested Docker image
