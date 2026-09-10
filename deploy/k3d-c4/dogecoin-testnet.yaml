@@ -1,0 +1,139 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dogecoin-testnet
+  namespace: default
+  labels:
+    app: dogecoin-testnet
+spec:
+  type: ClusterIP
+  selector:
+    app: dogecoin-testnet
+  ports:
+    - name: rpc
+      port: 44555
+      targetPort: rpc
+    - name: p2p
+      port: 44556
+      targetPort: p2p
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dogecoin-testnet-headless
+  namespace: default
+  labels:
+    app: dogecoin-testnet
+spec:
+  clusterIP: None
+  selector:
+    app: dogecoin-testnet
+  ports:
+    - name: p2p
+      port: 44556
+      targetPort: p2p
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dogecoin-testnet
+  namespace: default
+  labels:
+    app: dogecoin-testnet
+spec:
+  serviceName: dogecoin-testnet-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dogecoin-testnet
+  template:
+    metadata:
+      labels:
+        app: dogecoin-testnet
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: dogecoin
+          # Tested commit: 0861802693271c3a4e821999435ca57a676d4eb6
+          image: ghcr.io/qiaoxrcn/dogecoin-regtest-testnet@sha256:310fd38cf5cc7cd7224a21ed67f65a5c03e7ec38632f3c22cb111ee2f8acda13
+          imagePullPolicy: IfNotPresent
+          args:
+            - -rpcport=44555
+            - -port=44556
+            - -rpcbind=0.0.0.0
+            - -rpcallowip=0.0.0.0/0
+            - -rpcuser=$(DOGECOIN_RPC_USER)
+            - -rpcpassword=$(DOGECOIN_RPC_PASSWORD)
+          env:
+            - name: DOGECOIN_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: dogecoin-testnet-rpc
+                  key: username
+            - name: DOGECOIN_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dogecoin-testnet-rpc
+                  key: password
+          ports:
+            - name: rpc
+              containerPort: 44555
+            - name: p2p
+              containerPort: 44556
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          startupProbe:
+            tcpSocket:
+              port: rpc
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - >-
+                  exec dogecoin-cli -regtest -regtesttestnet -datadir=/data
+                  -rpcport=44555 -rpcuser="$DOGECOIN_RPC_USER"
+                  -rpcpassword="$DOGECOIN_RPC_PASSWORD" getblockcount
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: rpc
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          app: dogecoin-testnet
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi
