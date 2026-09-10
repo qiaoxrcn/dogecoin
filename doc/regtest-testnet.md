@@ -164,6 +164,27 @@ nodes need different data directories and explicit distinct RPC/P2P ports.
 
 ## Reproduce reorg
 
+For commands against the deployed Kubernetes service, including HTTP JSON-RPC
+examples and host port forwarding, see the [k3d-c4 operations guide](../deploy/k3d-c4/README.md).
+
+To direct mining rewards to a specific address, use
+`generatetoaddress N ADDRESS` instead of `generate N`. The address does not need
+to be imported into the node wallet, and the node does not need its private key.
+`generate` uses an address supplied by the node wallet instead. For example,
+with the Compose `rpc` helper defined above:
+
+```bash
+MINING_ADDRESS=nq5qTGSppHq2uAawXqQcqCtr5sdf9pyuHX
+rpc generatetoaddress 1 "$MINING_ADDRESS"
+OLD_TIP="$(rpc getbestblockhash)"
+rpc invalidateblock "$OLD_TIP"
+# After the explorer processes the rollback, mine a replacement branch.
+rpc generatetoaddress 2 "$MINING_ADDRESS"
+rpc getblock "$OLD_TIP"
+# Optionally make the old branch eligible again:
+# rpc reconsiderblock "$OLD_TIP"
+```
+
 For a single node, save a block hash, use `invalidateblock HASH` to detach that
 block and its descendants, and use `generate N` to mine a replacement branch.
 `reconsiderblock HASH` makes the old branch eligible again, subject to chain work.
